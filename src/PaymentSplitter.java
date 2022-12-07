@@ -113,7 +113,6 @@ public class PaymentSplitter {
                     debtor.balance += paymentAmount;
                     lender.balance -= paymentAmount;
                     payments.add(new Payment(paymentAmount, debtor, lender));
-
                 }
             }
             System.out.println("payments to settle up: ");
