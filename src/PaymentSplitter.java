@@ -166,6 +166,7 @@ public class PaymentSplitter {
 
             new Expense(85, DAN, ALL_SAVANNAH_PEOPLE.except(SLAVA))
     );
+
     private static final Trip SAVANNAH = new Trip("Savannah", 2022, ALL_SAVANNAH_PEOPLE, SAVANNAH_EXPENSES);
 
     public static void main(String[] args) {
