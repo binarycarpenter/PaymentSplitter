@@ -29,11 +29,14 @@ async function apiFetch(url, { method = 'GET', body } = {}) {
 }
 
 const api = {
-  getTrips:      ()              => apiFetch('/api/trips'),
-  createTrip:    (data)          => apiFetch('/api/trips',                        { method: 'POST', body: data }),
-  getTrip:       (id)            => apiFetch(`/api/trips/${id}`),
-  addExpense:    (tripId, data)  => apiFetch(`/api/trips/${tripId}/expenses`,     { method: 'POST', body: data }),
-  deleteExpense: (tripId, expId) => apiFetch(`/api/trips/${tripId}/expenses/${expId}`, { method: 'DELETE' }),
+  getTrips:      ()                    => apiFetch('/api/trips'),
+  createTrip:    (data)                => apiFetch('/api/trips',                                   { method: 'POST',  body: data }),
+  getTrip:       (id)                  => apiFetch(`/api/trips/${id}`),
+  addPerson:     (tripId, data)        => apiFetch(`/api/trips/${tripId}/people`,                  { method: 'POST',  body: data }),
+  updatePerson:  (tripId, pid, data)   => apiFetch(`/api/trips/${tripId}/people/${pid}`,           { method: 'PATCH', body: data }),
+  deletePerson:  (tripId, pid)         => apiFetch(`/api/trips/${tripId}/people/${pid}`,           { method: 'DELETE' }),
+  addExpense:    (tripId, data)        => apiFetch(`/api/trips/${tripId}/expenses`,                { method: 'POST',  body: data }),
+  deleteExpense: (tripId, expId)       => apiFetch(`/api/trips/${tripId}/expenses/${expId}`,       { method: 'DELETE' }),
 };
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -109,7 +112,7 @@ async function renderTripsPage(app) {
                 <a href="#/trips/${t.slug}" class="trip-card">
                   <div>
                     <div class="trip-card-name">${esc(t.name)}</div>
-                    <div class="trip-card-meta">${t.people_count} people · ${t.expense_count} expense${t.expense_count !== 1 ? 's' : ''}</div>
+                    <div class="trip-card-meta">${t.people_size > t.people_count ? `${t.people_size} people in ${t.people_count} groups` : `${t.people_count} people`} · ${t.expense_count} expense${t.expense_count !== 1 ? 's' : ''}</div>
                   </div>
                   <span class="trip-card-arrow">›</span>
                 </a>
@@ -196,14 +199,17 @@ async function renderTripsPage(app) {
 
 // ── Trip detail page ──────────────────────────────────────────────────────────
 
-async function renderTripPage(app, tripSlug) {
+async function renderTripPage(app, tripSlug, editPeopleOpen = false) {
   const trip = await api.getTrip(tripSlug);
 
   app.innerHTML = `
     <div class="page">
       <header class="page-header">
         <a href="#/" class="back-link">← All trips</a>
-        <h1>${esc(trip.name)}</h1>
+        <div class="page-header-main">
+          <h1>${esc(trip.name)}</h1>
+          <button id="editPeopleBtn" class="btn btn-secondary btn-sm">${editPeopleOpen ? 'Done' : 'Edit people'}</button>
+        </div>
         <div class="people-tags">
           ${trip.people.map(p => `<span class="tag">${esc(p.name)}${p.size > 1 ? `<span class="tag-size"> ×${p.size}</span>` : ''}</span>`).join('')}
         </div>
@@ -211,6 +217,7 @@ async function renderTripPage(app, tripSlug) {
 
       <div class="content trip-layout">
         <div class="main-column">
+          ${peopleEditorHtml(trip, editPeopleOpen)}
           ${expenseFormHtml(trip)}
           ${expenseListHtml(trip)}
         </div>
@@ -221,8 +228,130 @@ async function renderTripPage(app, tripSlug) {
     </div>
   `;
 
+  setupPeopleEditor(trip, editPeopleOpen);
   setupExpenseForm(trip);
   setupExpenseList(trip);
+}
+
+// ── People editor ─────────────────────────────────────────────────────────────
+
+function peopleEditorHtml(trip, open) {
+  return `
+    <section class="card" id="peopleEditor" style="display:${open ? 'block' : 'none'}">
+      <h2>Edit people</h2>
+      <div class="people-edit-list">
+        ${trip.people.map(p => `
+          <div class="person-edit-row" data-person-id="${p.id}" data-orig-name="${esc(p.name)}" data-orig-size="${p.size}">
+            <input type="text" class="person-edit-name person-input" value="${esc(p.name)}" autocomplete="off">
+            <div class="person-size-wrap" title="Group size (e.g. 2 for a couple)">
+              <span class="size-x">×</span>
+              <input type="number" class="person-edit-size person-size" value="${p.size}" min="1" max="20">
+            </div>
+            <button class="btn-icon person-delete-btn" title="Remove ${esc(p.name)}">×</button>
+          </div>
+        `).join('')}
+      </div>
+      <div class="person-add-row">
+        <input type="text" class="add-person-name person-input" placeholder="Add person…" autocomplete="off">
+        <div class="person-size-wrap" title="Group size">
+          <span class="size-x">×</span>
+          <input type="number" class="add-person-size person-size" value="1" min="1" max="20">
+        </div>
+        <button class="btn btn-secondary btn-sm add-person-btn">+ Add</button>
+      </div>
+      <div class="people-editor-footer">
+        <div class="people-editor-error error-msg" style="display:none"></div>
+        <button class="btn btn-primary people-save-btn">Save changes</button>
+      </div>
+    </section>
+  `;
+}
+
+function setupPeopleEditor(trip, open) {
+  const btn     = document.getElementById('editPeopleBtn');
+  const editor  = document.getElementById('peopleEditor');
+  const errEl   = editor.querySelector('.people-editor-error');
+  const saveBtn = editor.querySelector('.people-save-btn');
+
+  function showErr(msg) { errEl.textContent = msg; errEl.style.display = 'block'; }
+  function clearErr()   { errEl.style.display = 'none'; }
+
+  btn.addEventListener('click', () => {
+    const isOpen = editor.style.display !== 'none';
+    editor.style.display = isOpen ? 'none' : 'block';
+    btn.textContent = isOpen ? 'Edit people' : 'Done';
+  });
+
+  editor.addEventListener('input', clearErr);
+
+  // Save all edits at once
+  saveBtn.addEventListener('click', async () => {
+    clearErr();
+    const rows = [...editor.querySelectorAll('.person-edit-row')];
+
+    // Validate all rows first
+    for (const row of rows) {
+      if (!row.querySelector('.person-edit-name').value.trim()) {
+        showErr('Names cannot be empty.');
+        return;
+      }
+    }
+
+    // Collect rows that actually changed
+    const changed = rows.filter(row => {
+      const name = row.querySelector('.person-edit-name').value.trim();
+      const size = parseInt(row.querySelector('.person-edit-size').value) || 1;
+      return name !== row.dataset.origName || String(size) !== row.dataset.origSize;
+    });
+
+    if (changed.length === 0) {
+      editor.style.display = 'none';
+      btn.textContent = 'Edit people';
+      return;
+    }
+
+    saveBtn.disabled = true;
+    try {
+      await Promise.all(changed.map(row => {
+        const name = row.querySelector('.person-edit-name').value.trim();
+        const size = parseInt(row.querySelector('.person-edit-size').value) || 1;
+        return api.updatePerson(trip.slug, row.dataset.personId, { name, size });
+      }));
+      await renderTripPage(document.getElementById('app'), trip.slug, false);
+    } catch (err) { showErr(err.message); saveBtn.disabled = false; }
+  });
+
+  // Delete person (immediate, with confirm)
+  editor.addEventListener('click', async e => {
+    const deleteBtn = e.target.closest('.person-delete-btn');
+    if (!deleteBtn) return;
+    const row  = deleteBtn.closest('.person-edit-row');
+    const name = row.dataset.origName;
+    if (!confirm(`Remove ${name} from this trip?`)) return;
+    deleteBtn.disabled = true;
+    try {
+      await api.deletePerson(trip.slug, row.dataset.personId);
+      await renderTripPage(document.getElementById('app'), trip.slug, true);
+    } catch (err) { showErr(err.message); deleteBtn.disabled = false; }
+  });
+
+  // Add person (immediate)
+  const addBtn = editor.querySelector('.add-person-btn');
+  addBtn.addEventListener('click', async () => {
+    const nameInput = editor.querySelector('.add-person-name');
+    const name = nameInput.value.trim();
+    const size = parseInt(editor.querySelector('.add-person-size').value) || 1;
+    if (!name) { showErr('Please enter a name.'); return; }
+    addBtn.disabled = true;
+    try {
+      await api.addPerson(trip.slug, { name, size });
+      await renderTripPage(document.getElementById('app'), trip.slug, true);
+    } catch (err) { showErr(err.message); addBtn.disabled = false; }
+  });
+
+  editor.querySelector('.add-person-name').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); addBtn.click(); }
+  });
 }
 
 // ── Expense form ─────────────────────────────────────────────────────────────

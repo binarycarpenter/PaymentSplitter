@@ -34,6 +34,14 @@ body {
   margin-bottom: 1.75rem;
 }
 
+.page-header-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .5rem;
+}
+
 .page-header h1 {
   font-size: 1.75rem;
   font-weight: 700;
@@ -246,6 +254,40 @@ input:focus, select:focus {
   font-size: .8em;
   color: var(--muted);
 }
+
+/* ── People editor ──────────────────────────────────────────────────────────── */
+.people-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  margin-bottom: .75rem;
+}
+
+.person-edit-row {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+
+.person-add-row {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--border);
+}
+
+.people-editor-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-top: .75rem;
+  margin-top: .25rem;
+  border-top: 1px solid var(--border);
+}
+
+.people-editor-footer .error-msg { padding: 0; }
 
 /* ── Trips list ─────────────────────────────────────────────────────────────── */
 .trips-grid {

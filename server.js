@@ -94,35 +94,59 @@ async function calculateSettlement(tripId) {
     paidFor.forEach(p => (balances[p.id] -= perSlot * (p.size || 1)));
   }
 
-  // Greedy settlement: pair each debtor against each lender
+  // Backtracking search: find the settlement that maximises the minimum payment,
+  // eliminating tiny "not worth it" payments. At each step we pick the first
+  // unsettled debtor and try every unsettled lender; we prune any branch whose
+  // running minimum already can't beat the best solution found so far.
   const debtors = people
     .filter(p => balances[p.id] < -0.005)
-    .map(p => ({ ...p, balance: balances[p.id] }));
+    .map(p => ({ ...p, bal: balances[p.id] }));
   const lenders = people
     .filter(p => balances[p.id] > 0.005)
-    .map(p => ({ ...p, balance: balances[p.id] }));
+    .map(p => ({ ...p, bal: balances[p.id] }));
 
-  const payments = [];
-  for (const debtor of debtors) {
-    for (const lender of lenders) {
-      const amount = Math.min(Math.abs(debtor.balance), lender.balance);
-      if (amount < 0.005) continue;
-      debtor.balance += amount;
-      lender.balance -= amount;
-      payments.push({
-        from:   { id: debtor.id, name: debtor.name },
-        to:     { id: lender.id, name: lender.name },
-        amount: Math.round(amount * 100) / 100,
-      });
+  const best = { minPayment: -1, payments: null };
+
+  function solve(payments, currentMin) {
+    // Try largest lenders first so we find a good solution early and prune more
+    const active = lenders.filter(l => l.bal > 0.005).sort((a, b) => b.bal - a.bal);
+    const debtor = debtors.find(d => d.bal < -0.005);
+
+    // Base case: all debtors settled, or only floating-point residuals remain with
+    // no lenders left to absorb them (the old greedy handled this by skipping
+    // payments < $0.005; we do the same by treating "no active lenders" as done).
+    if (!debtor || active.length === 0) {
+      if (currentMin > best.minPayment) {
+        best.minPayment = currentMin;
+        best.payments = payments.map(p => ({ ...p }));
+      }
+      return;
+    }
+    for (const lender of active) {
+      const amount = Math.round(Math.min(-debtor.bal, lender.bal) * 100) / 100;
+      const newMin = Math.min(currentMin, amount);
+      if (newMin <= best.minPayment) continue; // can't improve — prune
+
+      debtor.bal += amount;
+      lender.bal -= amount;
+      payments.push({ from: { id: debtor.id, name: debtor.name }, to: { id: lender.id, name: lender.name }, amount });
+
+      solve(payments, newMin);
+
+      debtor.bal -= amount;
+      lender.bal += amount;
+      payments.pop();
     }
   }
+
+  solve([], Infinity);
 
   return {
     balances: people.map(p => ({
       person:  p,
       balance: Math.round(balances[p.id] * 100) / 100,
     })),
-    payments,
+    payments: best.payments ?? [],
   };
 }
 
@@ -138,8 +162,9 @@ app.get('/api/trips', async (req, res) => {
   try {
     const trips = await q(`
       SELECT t.*,
-        (SELECT COUNT(*) FROM people   WHERE trip_id = t.id) AS people_count,
-        (SELECT COUNT(*) FROM expenses WHERE trip_id = t.id) AS expense_count
+        (SELECT COUNT(*)   FROM people   WHERE trip_id = t.id) AS people_count,
+        (SELECT COALESCE(SUM(size), 0) FROM people WHERE trip_id = t.id) AS people_size,
+        (SELECT COUNT(*)   FROM expenses WHERE trip_id = t.id) AS expense_count
       FROM trips t ORDER BY t.created_at DESC
     `);
     res.json(trips);
@@ -210,6 +235,63 @@ app.get('/api/trips/:slug', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.post('/api/trips/:slug/people', async (req, res) => {
+  const { name, size } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ error: 'Name is required.' });
+
+  const trip = await q1('SELECT id FROM trips WHERE slug = ?', [req.params.slug]);
+  if (!trip) return res.status(404).json({ error: 'Trip not found.' });
+
+  const personSize = Math.max(1, parseInt(size) || 1);
+  const duplicate = await q1('SELECT id FROM people WHERE trip_id = ? AND name = ?', [trip.id, name.trim()]);
+  if (duplicate) return res.status(400).json({ error: `"${name.trim()}" is already on this trip.` });
+
+  const [{ insertId }] = await pool.execute(
+    'INSERT INTO people (trip_id, name, size) VALUES (?, ?, ?)',
+    [trip.id, name.trim(), personSize]
+  );
+  res.json(await q1('SELECT * FROM people WHERE id = ?', [insertId]));
+});
+
+app.patch('/api/trips/:slug/people/:personId', async (req, res) => {
+  const { name, size } = req.body;
+  const trip = await q1('SELECT id FROM trips WHERE slug = ?', [req.params.slug]);
+  if (!trip) return res.status(404).json({ error: 'Trip not found.' });
+
+  const person = await q1('SELECT * FROM people WHERE id = ? AND trip_id = ?', [req.params.personId, trip.id]);
+  if (!person) return res.status(404).json({ error: 'Person not found.' });
+
+  const newName = (name ?? person.name).trim();
+  const newSize = Math.max(1, parseInt(size) || person.size);
+  if (!newName) return res.status(400).json({ error: 'Name cannot be empty.' });
+
+  const duplicate = await q1(
+    'SELECT id FROM people WHERE trip_id = ? AND name = ? AND id != ?',
+    [trip.id, newName, req.params.personId]
+  );
+  if (duplicate) return res.status(400).json({ error: `"${newName}" is already on this trip.` });
+
+  await pool.execute('UPDATE people SET name = ?, size = ? WHERE id = ?', [newName, newSize, req.params.personId]);
+  res.json(await q1('SELECT * FROM people WHERE id = ?', [req.params.personId]));
+});
+
+app.delete('/api/trips/:slug/people/:personId', async (req, res) => {
+  const trip = await q1('SELECT id FROM trips WHERE slug = ?', [req.params.slug]);
+  if (!trip) return res.status(404).json({ error: 'Trip not found.' });
+
+  const person = await q1('SELECT * FROM people WHERE id = ? AND trip_id = ?', [req.params.personId, trip.id]);
+  if (!person) return res.status(404).json({ error: 'Person not found.' });
+
+  const usedAsPayer  = await q1('SELECT id FROM expenses WHERE paid_by = ?', [req.params.personId]);
+  const usedInSplit  = await q1('SELECT expense_id FROM expense_people WHERE person_id = ?', [req.params.personId]);
+  if (usedAsPayer || usedInSplit) {
+    return res.status(400).json({ error: `${person.name} is part of existing expenses. Delete those expenses first.` });
+  }
+
+  await pool.execute('DELETE FROM people WHERE id = ?', [req.params.personId]);
+  res.json({ ok: true });
 });
 
 app.post('/api/trips/:slug/expenses', async (req, res) => {
