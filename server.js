@@ -42,13 +42,19 @@ async function initDb() {
   `);
   await q(`
     CREATE TABLE IF NOT EXISTS people (
-      id       INT PRIMARY KEY AUTO_INCREMENT,
-      trip_id  INT NOT NULL,
-      name     VARCHAR(100) NOT NULL,
-      size     INT NOT NULL DEFAULT 1,
+      id             INT PRIMARY KEY AUTO_INCREMENT,
+      trip_id        INT NOT NULL,
+      name           VARCHAR(100) NOT NULL,
+      size           INT NOT NULL DEFAULT 1,
+      payment_type   VARCHAR(50)  DEFAULT NULL,
+      payment_handle VARCHAR(100) DEFAULT NULL,
       FOREIGN KEY (trip_id) REFERENCES trips(id)
     )
   `);
+  // Migrate existing tables that predate the payment columns
+  for (const col of ['payment_type VARCHAR(50) DEFAULT NULL', 'payment_handle VARCHAR(100) DEFAULT NULL']) {
+    try { await q(`ALTER TABLE people ADD COLUMN ${col}`); } catch { /* already exists */ }
+  }
   await q(`
     CREATE TABLE IF NOT EXISTS expenses (
       id          INT PRIMARY KEY AUTO_INCREMENT,
@@ -79,7 +85,9 @@ async function calculateSettlement(tripId) {
   const expenses = await q('SELECT * FROM expenses WHERE trip_id = ?', [tripId]);
 
   const balances = {};
-  people.forEach(p => (balances[p.id] = 0));
+  const paid     = {};  // total each person paid out of pocket
+  const spentOn  = {};  // total charged to each person/group across all expenses
+  people.forEach(p => { balances[p.id] = 0; paid[p.id] = 0; spentOn[p.id] = 0; });
 
   for (const expense of expenses) {
     const paidFor = await q(
@@ -88,10 +96,16 @@ async function calculateSettlement(tripId) {
        WHERE ep.expense_id = ?`,
       [expense.id]
     );
-    balances[expense.paid_by] += Number(expense.amount);
+    const amt = Number(expense.amount);
+    balances[expense.paid_by] += amt;
+    paid[expense.paid_by]     += amt;
     const totalSlots = paidFor.reduce((sum, p) => sum + (p.size || 1), 0);
-    const perSlot = Number(expense.amount) / totalSlots;
-    paidFor.forEach(p => (balances[p.id] -= perSlot * (p.size || 1)));
+    const perSlot = amt / totalSlots;
+    paidFor.forEach(p => {
+      const share = perSlot * (p.size || 1);
+      balances[p.id] -= share;
+      spentOn[p.id]  += share;
+    });
   }
 
   // Backtracking search: find the settlement that maximises the minimum payment,
@@ -129,7 +143,11 @@ async function calculateSettlement(tripId) {
 
       debtor.bal += amount;
       lender.bal -= amount;
-      payments.push({ from: { id: debtor.id, name: debtor.name }, to: { id: lender.id, name: lender.name }, amount });
+      payments.push({
+        from: { id: debtor.id, name: debtor.name },
+        to:   { id: lender.id, name: lender.name, payment_type: lender.payment_type, payment_handle: lender.payment_handle },
+        amount,
+      });
 
       solve(payments, newMin);
 
@@ -144,6 +162,8 @@ async function calculateSettlement(tripId) {
   return {
     balances: people.map(p => ({
       person:  p,
+      paid:    Math.round(paid[p.id]    * 100) / 100,
+      spentOn: Math.round(spentOn[p.id] * 100) / 100,
       balance: Math.round(balances[p.id] * 100) / 100,
     })),
     payments: best.payments ?? [],
@@ -256,15 +276,17 @@ app.post('/api/trips/:slug/people', async (req, res) => {
 });
 
 app.patch('/api/trips/:slug/people/:personId', async (req, res) => {
-  const { name, size } = req.body;
+  const { name, size, payment_type, payment_handle } = req.body;
   const trip = await q1('SELECT id FROM trips WHERE slug = ?', [req.params.slug]);
   if (!trip) return res.status(404).json({ error: 'Trip not found.' });
 
   const person = await q1('SELECT * FROM people WHERE id = ? AND trip_id = ?', [req.params.personId, trip.id]);
   if (!person) return res.status(404).json({ error: 'Person not found.' });
 
-  const newName = (name ?? person.name).trim();
-  const newSize = Math.max(1, parseInt(size) || person.size);
+  const newName          = (name ?? person.name).trim();
+  const newSize          = Math.max(1, parseInt(size) || person.size);
+  const newPaymentType   = payment_type   !== undefined ? (payment_type   || null) : person.payment_type;
+  const newPaymentHandle = payment_handle !== undefined ? (payment_handle || null) : person.payment_handle;
   if (!newName) return res.status(400).json({ error: 'Name cannot be empty.' });
 
   const duplicate = await q1(
@@ -273,7 +295,10 @@ app.patch('/api/trips/:slug/people/:personId', async (req, res) => {
   );
   if (duplicate) return res.status(400).json({ error: `"${newName}" is already on this trip.` });
 
-  await pool.execute('UPDATE people SET name = ?, size = ? WHERE id = ?', [newName, newSize, req.params.personId]);
+  await pool.execute(
+    'UPDATE people SET name = ?, size = ?, payment_type = ?, payment_handle = ? WHERE id = ?',
+    [newName, newSize, newPaymentType, newPaymentHandle, req.params.personId]
+  );
   res.json(await q1('SELECT * FROM people WHERE id = ?', [req.params.personId]));
 });
 

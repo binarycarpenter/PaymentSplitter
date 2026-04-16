@@ -80,30 +80,6 @@ body {
   gap: 1.25rem;
 }
 
-.trip-layout {
-  flex-direction: row;
-  align-items: flex-start;
-}
-
-.main-column {
-  flex: 1 1 0;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.side-column {
-  flex: 0 0 300px;
-  position: sticky;
-  top: 1.5rem;
-}
-
-@media (max-width: 800px) {
-  .trip-layout    { flex-direction: column; }
-  .side-column    { flex: none; width: 100%; position: static; }
-}
-
 /* ── Cards ──────────────────────────────────────────────────────────────────── */
 .card {
   background: var(--card);
@@ -269,6 +245,23 @@ input:focus, select:focus {
   gap: .4rem;
 }
 
+.venmo-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: .2rem;
+  flex-shrink: 0;
+}
+
+.venmo-prefix {
+  font-size: .8rem;
+  color: var(--muted);
+}
+
+.person-edit-handle {
+  width: 100px !important;
+  font-size: .8rem;
+}
+
 .person-add-row {
   display: flex;
   align-items: center;
@@ -402,8 +395,13 @@ input:focus, select:focus {
 /* ── Settlement ─────────────────────────────────────────────────────────────── */
 .settlement-card h2 { margin-bottom: .75rem; }
 
-.settlement-section { margin-bottom: 1.1rem; }
-.settlement-section:last-child { margin-bottom: 0; }
+.settlement-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.settlement-section { }
 
 .settlement-label {
   font-size: .72rem;
@@ -411,42 +409,152 @@ input:focus, select:focus {
   text-transform: uppercase;
   letter-spacing: .06em;
   color: var(--muted);
-  margin-bottom: .4rem;
+  margin-bottom: .5rem;
 }
 
-.balance-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: .28rem 0;
+/* Breakdown table */
+.breakdown-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
   font-size: .875rem;
 }
 
-.balance-name  { color: var(--text); }
+.breakdown-table th:first-child,
+.breakdown-table td:first-child {
+  width: 14%;
+}
+
+.breakdown-table th {
+  text-align: left;
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+  padding: .3rem 1rem .3rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.breakdown-table td {
+  padding: .45rem 1rem .45rem 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.breakdown-table tbody tr:last-child td { border-bottom: none; }
+.breakdown-table th.col-num,
+.breakdown-table td.col-num {
+  text-align: right;
+  padding-right: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .balance-amt   { font-weight: 600; }
+.balance-size  { font-size: .8em; color: var(--muted); }
 .amt-pos       { color: var(--success); }
 .amt-neg       { color: var(--danger); }
 .amt-zero      { color: var(--muted); }
 
-.payment-row {
-  display: flex;
+/* Payments */
+.payments-list {
+  display: grid;
+  grid-template-columns: auto auto auto auto auto;
+  column-gap: .45rem;
+  row-gap: .35rem;
   align-items: center;
-  gap: .4rem;
-  padding: .35rem 0;
-  font-size: .875rem;
-  border-bottom: 1px solid var(--border);
 }
-.payment-row:last-child { border-bottom: none; }
 
-.pay-from   { font-weight: 500; }
-.pay-arrow  { color: var(--muted); flex-shrink: 0; }
-.pay-to     { font-weight: 500; }
-.pay-amt    { font-weight: 700; margin-left: auto; flex-shrink: 0; }
+.payment-row { display: contents; }
+.payment-row > * { font-size: .875rem; }
+
+.pay-from  { font-weight: 500; }
+.pay-arrow { color: var(--muted); }
+.pay-to    { font-weight: 500; }
+.pay-amt   { font-weight: 700; }
+
+.pay-action { flex-shrink: 0; font-size: .78rem; }
+
+.pay-action-venmo {
+  padding: .2rem .6rem;
+  background: #008CFF;
+  color: #fff;
+  border-radius: 999px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity .15s;
+  text-align: center;
+}
+.pay-action-venmo:hover { opacity: .85; }
+
+.pay-action-missing {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.pay-action-add-venmo {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary);
+  font-size: .78rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pay-action-add-venmo:hover { color: var(--primary-dark); }
 
 .all-settled {
   font-size: .875rem;
   color: var(--success);
   font-weight: 500;
+}
+
+/* ── Expense list footer ────────────────────────────────────────────────────── */
+.expense-list-footer {
+  margin-top: 1rem;
+  padding-top: .75rem;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Modal ──────────────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.modal {
+  background: var(--card);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0;
+  padding: 0;
+  border: none;
 }
 
 /* ── Misc ───────────────────────────────────────────────────────────────────── */
